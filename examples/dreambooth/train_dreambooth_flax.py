@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 import jax
-import jax.numpy as jnp
 import numpy as np
+import jax.numpy as jnp
 import optax
 import torch
 import torch.utils.checkpoint
@@ -18,6 +18,7 @@ from flax.training import train_state
 from flax.training.common_utils import shard
 from huggingface_hub import HfFolder, Repository, create_repo, whoami
 from jax.experimental.compilation_cache import compilation_cache as cc
+from omegaconf import OmegaConf
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -42,180 +43,6 @@ check_min_version("0.20.0.dev0")
 cc.initialize_cache(os.path.expanduser("~/.cache/jax/compilation_cache"))
 
 logger = logging.getLogger(__name__)
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Simple example of a training script.")
-    parser.add_argument(
-        "--pretrained_model_name_or_path",
-        type=str,
-        default=None,
-        required=True,
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--pretrained_vae_name_or_path",
-        type=str,
-        default=None,
-        help="Path to pretrained vae or vae identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--revision",
-        type=str,
-        default=None,
-        required=False,
-        help="Revision of pretrained model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--tokenizer_name",
-        type=str,
-        default=None,
-        help="Pretrained tokenizer name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--instance_data_dir",
-        type=str,
-        default=None,
-        required=True,
-        help="A folder containing the training data of instance images.",
-    )
-    parser.add_argument(
-        "--class_data_dir",
-        type=str,
-        default=None,
-        required=False,
-        help="A folder containing the training data of class images.",
-    )
-    parser.add_argument(
-        "--instance_prompt",
-        type=str,
-        default=None,
-        help="The prompt with identifier specifying the instance",
-    )
-    parser.add_argument(
-        "--class_prompt",
-        type=str,
-        default=None,
-        help="The prompt to specify images in the same class as provided instance images.",
-    )
-    parser.add_argument(
-        "--with_prior_preservation",
-        default=False,
-        action="store_true",
-        help="Flag to add prior preservation loss.",
-    )
-    parser.add_argument("--prior_loss_weight", type=float, default=1.0, help="The weight of prior preservation loss.")
-    parser.add_argument(
-        "--num_class_images",
-        type=int,
-        default=100,
-        help=(
-            "Minimal class images for prior preservation loss. If there are not enough images already present in"
-            " class_data_dir, additional images will be sampled with class_prompt."
-        ),
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="text-inversion-model",
-        help="The output directory where the model predictions and checkpoints will be written.",
-    )
-    parser.add_argument("--save_steps", type=int, default=None, help="Save a checkpoint every X steps.")
-    parser.add_argument("--seed", type=int, default=0, help="A seed for reproducible training.")
-    parser.add_argument(
-        "--resolution",
-        type=int,
-        default=512,
-        help=(
-            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
-            " resolution"
-        ),
-    )
-    parser.add_argument(
-        "--center_crop",
-        default=False,
-        action="store_true",
-        help=(
-            "Whether to center crop the input images to the resolution. If not set, the images will be randomly"
-            " cropped. The images will be resized to the resolution first before cropping."
-        ),
-    )
-    parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
-    parser.add_argument(
-        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
-    )
-    parser.add_argument(
-        "--sample_batch_size", type=int, default=4, help="Batch size (per device) for sampling images."
-    )
-    parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument(
-        "--max_train_steps",
-        type=int,
-        default=None,
-        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=5e-6,
-        help="Initial learning rate (after the potential warmup period) to use.",
-    )
-    parser.add_argument(
-        "--scale_lr",
-        action="store_true",
-        default=False,
-        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
-    )
-    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
-    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
-    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
-    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
-    parser.add_argument(
-        "--hub_model_id",
-        type=str,
-        default=None,
-        help="The name of the repository to keep in sync with the local `output_dir`.",
-    )
-    parser.add_argument(
-        "--logging_dir",
-        type=str,
-        default="logs",
-        help=(
-            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
-        ),
-    )
-    parser.add_argument(
-        "--mixed_precision",
-        type=str,
-        default="no",
-        choices=["no", "fp16", "bf16"],
-        help=(
-            "Whether to use mixed precision. Choose"
-            "between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10."
-            "and an Nvidia Ampere GPU."
-        ),
-    )
-    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
-
-    args = parser.parse_args()
-    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
-        args.local_rank = env_local_rank
-
-    if args.instance_data_dir is None:
-        raise ValueError("You must specify a train data directory.")
-
-    if args.with_prior_preservation:
-        if args.class_data_dir is None:
-            raise ValueError("You must specify a data directory for class images.")
-        if args.class_prompt is None:
-            raise ValueError("You must specify prompt for class images.")
-
-    return args
 
 
 class DreamBoothDataset(Dataset):
@@ -332,8 +159,54 @@ def get_params_to_save(params):
     return jax.device_get(jax.tree_util.tree_map(lambda x: x[0], params))
 
 
-def main():
-    args = parse_args()
+def main(
+    pretrained_model_name_or_path: Optional[str],
+    pretrained_vae_name_or_path: Optional[str],
+    revision: Optional[str],
+    tokenizer_name: Optional[str],
+    instance_data_dir: Optional[str],
+    class_data_dir: Optional[str],
+    instance_prompt: Optional[str],
+    class_prompt: Optional[str],
+    with_prior_preservation: bool,
+    prior_loss_weight: float,
+    num_class_images: int,
+    output_dir: str,
+    save_steps: Optional[int],
+    seed: int,
+    resolution: int,
+    center_crop: bool,
+    train_text_encoder: bool,
+    train_batch_size: int,
+    sample_batch_size: int,
+    num_train_epochs: int,
+    max_train_steps: Optional[int],
+    learning_rate: float,
+    scale_lr: bool,
+    adam_beta1: float,
+    adam_beta2: float,
+    adam_weight_decay: float,
+    adam_epsilon: float,
+    max_grad_norm: float,
+    push_to_hub: bool,
+    hub_token: Optional[str],
+    hub_model_id: Optional[str],
+    logging_dir: str,
+    mixed_precision: str,
+    local_rank: int,
+):
+    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    if env_local_rank != -1 and env_local_rank != local_rank:
+        local_rank = env_local_rank
+
+    if instance_data_dir is None:
+        raise ValueError("You must specify a train data directory.")
+
+    if with_prior_preservation:
+        if class_data_dir is None:
+            raise ValueError("You must specify a data directory for class images.")
+        if class_prompt is None:
+            raise ValueError("You must specify prompt for class images.")
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -347,28 +220,28 @@ def main():
     else:
         transformers.utils.logging.set_verbosity_error()
 
-    if args.seed is not None:
-        set_seed(args.seed)
+    if seed is not None:
+        set_seed(seed)
 
-    rng = jax.random.PRNGKey(args.seed)
+    rng = jax.random.PRNGKey(seed)
 
-    if args.with_prior_preservation:
-        class_images_dir = Path(args.class_data_dir)
+    if with_prior_preservation:
+        class_images_dir = Path(class_data_dir)
         if not class_images_dir.exists():
             class_images_dir.mkdir(parents=True)
         cur_class_images = len(list(class_images_dir.iterdir()))
 
-        if cur_class_images < args.num_class_images:
+        if cur_class_images < num_class_images:
             pipeline, params = FlaxStableDiffusionPipeline.from_pretrained(
-                args.pretrained_model_name_or_path, safety_checker=None, revision=args.revision
+                pretrained_model_name_or_path, safety_checker=None, revision=revision
             )
             pipeline.set_progress_bar_config(disable=True)
 
-            num_new_images = args.num_class_images - cur_class_images
+            num_new_images = num_class_images - cur_class_images
             logger.info(f"Number of class images to sample: {num_new_images}.")
 
-            sample_dataset = PromptDataset(args.class_prompt, num_new_images)
-            total_sample_batch_size = args.sample_batch_size * jax.local_device_count()
+            sample_dataset = PromptDataset(class_prompt, num_new_images)
+            total_sample_batch_size = sample_batch_size * jax.local_device_count()
             sample_dataloader = torch.utils.data.DataLoader(sample_dataset, batch_size=total_sample_batch_size)
 
             for example in tqdm(
@@ -392,41 +265,41 @@ def main():
 
     # Handle the repository creation
     if jax.process_index() == 0:
-        if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
+        if push_to_hub:
+            if hub_model_id is None:
+                repo_name = get_full_repo_name(Path(output_dir).name, token=hub_token)
             else:
-                repo_name = args.hub_model_id
-            create_repo(repo_name, exist_ok=True, token=args.hub_token)
-            repo = Repository(args.output_dir, clone_from=repo_name, token=args.hub_token)
+                repo_name = hub_model_id
+            create_repo(repo_name, exist_ok=True, token=hub_token)
+            repo = Repository(output_dir, clone_from=repo_name, token=hub_token)
 
-            with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
+            with open(os.path.join(output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
                     gitignore.write("step_*\n")
                 if "epoch_*" not in gitignore:
                     gitignore.write("epoch_*\n")
-        elif args.output_dir is not None:
-            os.makedirs(args.output_dir, exist_ok=True)
+        elif output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
 
     # Load the tokenizer and add the placeholder token as a additional special token
-    if args.tokenizer_name:
-        tokenizer = CLIPTokenizer.from_pretrained(args.tokenizer_name)
-    elif args.pretrained_model_name_or_path:
+    if tokenizer_name:
+        tokenizer = CLIPTokenizer.from_pretrained(tokenizer_name)
+    elif pretrained_model_name_or_path:
         tokenizer = CLIPTokenizer.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
+            pretrained_model_name_or_path, subfolder="tokenizer", revision=revision
         )
     else:
         raise NotImplementedError("No tokenizer specified!")
 
     train_dataset = DreamBoothDataset(
-        instance_data_root=args.instance_data_dir,
-        instance_prompt=args.instance_prompt,
-        class_data_root=args.class_data_dir if args.with_prior_preservation else None,
-        class_prompt=args.class_prompt,
-        class_num=args.num_class_images,
+        instance_data_root=instance_data_dir,
+        instance_prompt=instance_prompt,
+        class_data_root=class_data_dir if with_prior_preservation else None,
+        class_prompt=class_prompt,
+        class_num=num_class_images,
         tokenizer=tokenizer,
-        size=args.resolution,
-        center_crop=args.center_crop,
+        size=resolution,
+        center_crop=center_crop,
     )
 
     def collate_fn(examples):
@@ -435,7 +308,7 @@ def main():
 
         # Concat class and instance examples for prior preservation.
         # We do this to avoid doing two forward passes.
-        if args.with_prior_preservation:
+        if with_prior_preservation:
             input_ids += [example["class_prompt_ids"] for example in examples]
             pixel_values += [example["class_images"] for example in examples]
 
@@ -453,7 +326,7 @@ def main():
         batch = {k: v.numpy() for k, v in batch.items()}
         return batch
 
-    total_train_batch_size = args.train_batch_size * jax.local_device_count()
+    total_train_batch_size = train_batch_size * jax.local_device_count()
     if len(train_dataset) < total_train_batch_size:
         raise ValueError(
             f"Training batch size is {total_train_batch_size}, but your dataset only contains"
@@ -466,20 +339,20 @@ def main():
     )
 
     weight_dtype = jnp.float32
-    if args.mixed_precision == "fp16":
+    if mixed_precision == "fp16":
         weight_dtype = jnp.float16
-    elif args.mixed_precision == "bf16":
+    elif mixed_precision == "bf16":
         weight_dtype = jnp.bfloat16
 
-    if args.pretrained_vae_name_or_path:
+    if pretrained_vae_name_or_path:
         # TODO(patil-suraj): Upload flax weights for the VAE
-        vae_arg, vae_kwargs = (args.pretrained_vae_name_or_path, {"from_pt": True})
+        vae_arg, vae_kwargs = (pretrained_vae_name_or_path, {"from_pt": True})
     else:
-        vae_arg, vae_kwargs = (args.pretrained_model_name_or_path, {"subfolder": "vae", "revision": args.revision})
+        vae_arg, vae_kwargs = (pretrained_model_name_or_path, {"subfolder": "vae", "revision": revision})
 
     # Load models and create wrapper for stable diffusion
     text_encoder = FlaxCLIPTextModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", dtype=weight_dtype, revision=args.revision
+        pretrained_model_name_or_path, subfolder="text_encoder", dtype=weight_dtype, revision=revision
     )
     vae, vae_params = FlaxAutoencoderKL.from_pretrained(
         vae_arg,
@@ -487,25 +360,25 @@ def main():
         **vae_kwargs,
     )
     unet, unet_params = FlaxUNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", dtype=weight_dtype, revision=args.revision
+        pretrained_model_name_or_path, subfolder="unet", dtype=weight_dtype, revision=revision
     )
 
     # Optimization
-    if args.scale_lr:
-        args.learning_rate = args.learning_rate * total_train_batch_size
+    if scale_lr:
+        learning_rate = learning_rate * total_train_batch_size
 
-    constant_scheduler = optax.constant_schedule(args.learning_rate)
+    constant_scheduler = optax.constant_schedule(learning_rate)
 
     adamw = optax.adamw(
         learning_rate=constant_scheduler,
-        b1=args.adam_beta1,
-        b2=args.adam_beta2,
-        eps=args.adam_epsilon,
-        weight_decay=args.adam_weight_decay,
+        b1=adam_beta1,
+        b2=adam_beta2,
+        eps=adam_epsilon,
+        weight_decay=adam_weight_decay,
     )
 
     optimizer = optax.chain(
-        optax.clip_by_global_norm(args.max_grad_norm),
+        optax.clip_by_global_norm(max_grad_norm),
         adamw,
     )
 
@@ -525,7 +398,7 @@ def main():
     def train_step(unet_state, text_encoder_state, vae_params, batch, train_rng):
         dropout_rng, sample_rng, new_train_rng = jax.random.split(train_rng, 3)
 
-        if args.train_text_encoder:
+        if train_text_encoder:
             params = {"text_encoder": text_encoder_state.params, "unet": unet_state.params}
         else:
             params = {"unet": unet_state.params}
@@ -557,7 +430,7 @@ def main():
             noisy_latents = noise_scheduler.add_noise(noise_scheduler_state, latents, noise, timesteps)
 
             # Get the text embedding for conditioning
-            if args.train_text_encoder:
+            if train_text_encoder:
                 encoder_hidden_states = text_encoder_state.apply_fn(
                     batch["input_ids"], params=params["text_encoder"], dropout_rng=dropout_rng, train=True
                 )[0]
@@ -579,7 +452,7 @@ def main():
             else:
                 raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-            if args.with_prior_preservation:
+            if with_prior_preservation:
                 # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
                 model_pred, model_pred_prior = jnp.split(model_pred, 2, axis=0)
                 target, target_prior = jnp.split(target, 2, axis=0)
@@ -593,7 +466,7 @@ def main():
                 prior_loss = prior_loss.mean()
 
                 # Add the prior loss to the instance loss.
-                loss = loss + args.prior_loss_weight * prior_loss
+                loss = loss + prior_loss_weight * prior_loss
             else:
                 loss = (target - model_pred) ** 2
                 loss = loss.mean()
@@ -605,7 +478,7 @@ def main():
         grad = jax.lax.pmean(grad, "batch")
 
         new_unet_state = unet_state.apply_gradients(grads=grad["unet"])
-        if args.train_text_encoder:
+        if train_text_encoder:
             new_text_encoder_state = text_encoder_state.apply_gradients(grads=grad["text_encoder"])
         else:
             new_text_encoder_state = text_encoder_state
@@ -627,17 +500,17 @@ def main():
     num_update_steps_per_epoch = math.ceil(len(train_dataloader))
 
     # Scheduler and math around the number of training steps.
-    if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+    if max_train_steps is None:
+        max_train_steps = num_train_epochs * num_update_steps_per_epoch
 
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    num_train_epochs = math.ceil(max_train_steps / num_update_steps_per_epoch)
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
+    logger.info(f"  Num Epochs = {num_train_epochs}")
+    logger.info(f"  Instantaneous batch size per device = {train_batch_size}")
     logger.info(f"  Total train batch size (w. parallel & distributed) = {total_train_batch_size}")
-    logger.info(f"  Total optimization steps = {args.max_train_steps}")
+    logger.info(f"  Total optimization steps = {max_train_steps}")
 
     def checkpoint(step=None):
         # Create the pipeline using the trained modules and save it.
@@ -655,7 +528,7 @@ def main():
             feature_extractor=CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch32"),
         )
 
-        outdir = os.path.join(args.output_dir, str(step)) if step else args.output_dir
+        outdir = os.path.join(output_dir, str(step)) if step else output_dir
         pipeline.save_pretrained(
             outdir,
             params={
@@ -666,13 +539,13 @@ def main():
             },
         )
 
-        if args.push_to_hub:
+        if push_to_hub:
             message = f"checkpoint-{step}" if step is not None else "End of training"
             repo.push_to_hub(commit_message=message, blocking=False, auto_lfs_prune=True)
 
     global_step = 0
 
-    epochs = tqdm(range(args.num_train_epochs), desc="Epoch ... ", position=0)
+    epochs = tqdm(range(num_train_epochs), desc="Epoch ... ", position=0)
     for epoch in epochs:
         # ======================== Training ================================
 
@@ -691,19 +564,24 @@ def main():
             train_step_progress_bar.update(jax.local_device_count())
 
             global_step += 1
-            if jax.process_index() == 0 and args.save_steps and global_step % args.save_steps == 0:
+            if jax.process_index() == 0 and save_steps and global_step % save_steps == 0:
                 checkpoint(global_step)
-            if global_step >= args.max_train_steps:
+            if global_step >= max_train_steps:
                 break
 
         train_metric = jax_utils.unreplicate(train_metric)
 
         train_step_progress_bar.close()
-        epochs.write(f"Epoch... ({epoch + 1}/{args.num_train_epochs} | Loss: {train_metric['loss']})")
+        epochs.write(f"Epoch... ({epoch + 1}/{num_train_epochs} | Loss: {train_metric['loss']})")
 
     if jax.process_index() == 0:
         checkpoint()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="configs/train_dreambooth_flax.yaml")
+    args = parser.parse_args()
+    configs = OmegaConf.load(args.config)
+
+    main(**configs)

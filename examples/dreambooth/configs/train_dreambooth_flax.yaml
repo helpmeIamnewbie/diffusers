@@ -1,0 +1,101 @@
+# Path to pretrained model or model identifier from huggingface.co/models
+pretrained_model_name_or_path: duongna/stable-diffusion-v1-4-flax
+
+# Path to pretrained vae or vae identifier from huggingface.co/models
+pretrained_vae_name_or_path: null 
+
+# Revision of pretrained model identifier from huggingface.co/models
+revision: null 
+
+# Pretrained tokenizer name or path if not the same as model_name
+tokenizer_name: null 
+
+# A folder containing the training data of instance images
+instance_data_dir: INSTANCE_DIR
+
+# A folder containing the training data of class images
+class_data_dir: null 
+
+# The prompt with identifier specifying the instance
+instance_prompt: A photo of sks dog 
+
+# The prompt to specify images in the same class as provided instance images
+class_prompt: null 
+
+# Flag to add prior preservation loss
+with_prior_preservation: false 
+
+# The weight of prior preservation loss
+prior_loss_weight: 1.0 
+
+# Minimal class images for prior preservation loss
+num_class_images: 100 
+
+# The output directory where the model predictions and checkpoints will be written
+output_dir: "text-inversion-model" 
+
+# Save a checkpoint every X steps
+save_steps: null 
+
+# A seed for reproducible training
+seed: 0 
+
+# The resolution for input images
+resolution: 512 
+
+# Whether to center crop the input images to the resolution
+center_crop: false 
+
+# Whether to train the text encoder
+train_text_encoder: false 
+
+# Batch size (per device) for the training dataloader
+train_batch_size: 4 
+
+# Batch size (per device) for sampling images
+sample_batch_size: 4 
+
+# Number of training epochs
+num_train_epochs: 1 
+
+# Total number of training steps to perform
+max_train_steps: null 
+
+# Initial learning rate (after the potential warmup period) to use
+learning_rate: 0.000005 
+
+# Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size
+scale_lr: false 
+
+# The beta1 parameter for the Adam optimizer
+adam_beta1: 0.9 
+
+# The beta2 parameter for the Adam optimizer
+adam_beta2: 0.999 
+
+# Weight decay to use
+adam_weight_decay: 0.01 
+
+# Epsilon value for the Adam optimizer
+adam_epsilon: 0.00000001 
+
+# Max gradient norm
+max_grad_norm: 1.0 
+
+# Whether or not to push the model to the Hub
+push_to_hub: false 
+
+# The token to use to push to the Model Hub
+hub_token: null 
+
+# The name of the repository to keep in sync with the local `output_dir`
+hub_model_id: null 
+
+# [TensorBoard] log directory
+logging_dir: "logs" 
+
+# Whether to use mixed precision
+mixed_precision: "no" 
+
+# For distributed training: local_rank
+local_rank: -1 

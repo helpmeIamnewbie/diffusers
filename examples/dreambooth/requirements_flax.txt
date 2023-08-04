@@ -6,3 +6,4 @@ torchvision
 ftfy
 tensorboard
 Jinja2
+omegaconf
